@@ -20,8 +20,12 @@ embeddings e o bridge que adapta os transportes MCP.
 
 ## Serviço Docker
 
-O serviço é definido em [`../docker-compose.yaml`](../docker-compose.yaml),
-com o nome `mempalace-mcp`:
+Este repositório possui um compose independente em
+[`docker-compose.yaml`](docker-compose.yaml). O compose geral da infraestrutura
+também mantém uma definição equivalente em
+[`../docker-compose.yaml`](../docker-compose.yaml).
+
+O serviço usa o nome `mempalace-mcp`:
 
 ```yaml
 image: mempalace:3.11.0
@@ -73,11 +77,11 @@ do MemPalace nem cria uma segunda base de memória.
 
 ## Operação
 
-Na raiz de `infra`:
+No diretório deste repositório:
 
 ```bash
-# Subir ou recriar somente o serviço
-docker compose up -d mempalace-mcp
+# Subir ou recriar o serviço independente
+docker compose up -d
 
 # Ver estado e logs
 docker compose ps mempalace-mcp
@@ -86,6 +90,15 @@ docker compose logs --tail=100 mempalace-mcp
 # Healthcheck HTTP
 curl -sS http://127.0.0.1:5001/health
 ```
+
+> **Atenção:** não suba este compose enquanto o serviço `mempalace-mcp` do
+> compose geral estiver ativo. Ambos usam o mesmo `container_name` e as portas
+> 5000/5001. Para trocar de definição, pare primeiro a outra:
+>
+> ```bash
+> docker compose -f ../docker-compose.yaml stop mempalace-mcp
+> docker compose up -d
+> ```
 
 Uma resposta saudável informa `status: "ok"` e a quantidade de workers vivos.
 O pool padrão tem dois workers e pode ser ajustado por

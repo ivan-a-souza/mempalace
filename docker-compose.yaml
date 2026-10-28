@@ -1,0 +1,30 @@
+services:
+  mempalace-mcp:
+    image: mempalace:3.11.0
+    container_name: mempalace-mcp
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "0.5"
+    volumes:
+      - ./data:/data
+      - ./mcp-tcp-bridge.py:/mcp-tcp-bridge.py:ro
+      - ./cache:/root/.cache
+    entrypoint:
+      - python3
+      - /mcp-tcp-bridge.py
+    environment:
+      # Cada worker carrega o modelo ONNX; dois workers equilibram
+      # concorrência e consumo dentro do limite de 2 GB.
+      MCP_HTTP_POOL_SIZE: "2"
+    ports:
+      - "127.0.0.1:5000:5000" # TCP MCP (stdio/TCP)
+      - "127.0.0.1:5001:5001" # HTTP MCP (POST /mcp)
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5001/health',timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
