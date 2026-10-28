@@ -2,6 +2,10 @@ services:
   mempalace-mcp:
     image: mempalace:3.11.0
     container_name: mempalace-mcp
+    # Use o UID/GID do dono de data/ e cache/ no host.
+    user: "${MEMPALACE_UID:-1000}:${MEMPALACE_GID:-1000}"
+    env_file:
+      - .env
     deploy:
       resources:
         limits:
@@ -9,20 +13,24 @@ services:
           cpus: "0.5"
     volumes:
       - ./data:/data
-      - ./mcp-tcp-bridge.py:/mcp-tcp-bridge.py:ro
-      - ./cache:/root/.cache
+      - ./cache:/tmp/.cache
     entrypoint:
       - python3
-      - /mcp-tcp-bridge.py
-    environment:
-      # Cada worker carrega o modelo ONNX; dois workers equilibram
-      # concorrência e consumo dentro do limite de 2 GB.
-      MCP_HTTP_POOL_SIZE: "2"
+      - -m
+      - mempalace.mcp_server
+    command:
+      - --palace
+      - /data
+      - --transport
+      - http
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5001"
     ports:
-      - "127.0.0.1:5000:5000" # TCP MCP (stdio/TCP)
       - "127.0.0.1:5001:5001" # HTTP MCP (POST /mcp)
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5001/health',timeout=5).status==200 else 1)\""]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/healthz',timeout=5).close()"]
       interval: 30s
       timeout: 10s
       retries: 3

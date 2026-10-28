@@ -18,5 +18,9 @@ test-*-data*/
 *.sqlite3-shm
 *.sqlite3-wal
 
-# Logs locais do bridge/workers
+# Logs locais
 *.log
+# Credenciais locais (versionar somente o template)
+.env
+.env.*
+!.env.example

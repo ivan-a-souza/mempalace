@@ -1,18 +1,21 @@
-# MemPalace — infraestrutura local
+# MemPalace MCP
 
-Este diretório contém os artefatos locais usados pelo serviço MCP do
-MemPalace dentro do projeto [`infra`](../).
+O [MemPalace](https://github.com/MemPalace/mempalace) é um sistema de memória
+local para assistentes de IA. Ele armazena o conteúdo original de conversas
+e permite recuperá-lo por busca semântica, organizado em alas, salas e
+gavetas para separar projetos e assuntos.
 
-O código principal do MemPalace é fornecido pela imagem Docker
-`mempalace:3.11.0`. Este diretório não é o repositório-fonte completo do
-MemPalace: ele guarda os dados persistentes, o cache local do modelo de
-embeddings e o bridge que adapta os transportes MCP.
+Este diretório configura o servidor HTTP nativo do MemPalace com Docker
+Compose. O código principal é fornecido pela imagem `mempalace:3.11.0`.
 
 ## Estrutura
 
 | Caminho | Função | Versionar? |
 | --- | --- | --- |
-| `mcp-tcp-bridge.py` | Bridge TCP/HTTP do MCP | Sim |
+| `docker-compose.yaml` | Serviço MCP por HTTP | Sim |
+| `.env.example` | Template da configuração local | Sim |
+| `.env` | Chave HTTP e caminhos internos do container | Não |
+| `LICENSE` | Licença MIT dos arquivos deste diretório | Sim |
 | `data/` | Banco e dados persistentes do palácio | Não |
 | `cache/` | Cache do modelo ONNX de embeddings | Não |
 | `backups/` | Backups locais | Não |
@@ -20,104 +23,154 @@ embeddings e o bridge que adapta os transportes MCP.
 
 ## Serviço Docker
 
-Este repositório possui um compose independente em
-[`docker-compose.yaml`](docker-compose.yaml). O compose geral da infraestrutura
-também mantém uma definição equivalente em
-[`../docker-compose.yaml`](../docker-compose.yaml).
+O [`docker-compose.yaml`](docker-compose.yaml) define o serviço `mempalace-mcp`.
+Antes de subir, disponibilize a imagem local no daemon Docker em uso:
 
-O serviço usa o nome `mempalace-mcp`:
-
-```yaml
-image: mempalace:3.11.0
-entrypoint: python3 /mcp-tcp-bridge.py
+```bash
+docker image inspect mempalace:3.11.0
 ```
+
+Este diretório não inclui um Dockerfile para construí-la. Em outro host ou
+daemon rootless, a imagem precisa ser construída a partir do projeto-fonte
+ou importada.
+
+O container inicia diretamente o transporte HTTP do MemPalace:
+
+```bash
+python3 -m mempalace.mcp_server --palace /data --transport http --host 0.0.0.0 --port 5001
+```
+
+As chamadas são processadas pelo servidor nativo, que mantém o processo e
+reutiliza o modelo de embeddings entre requisições.
 
 Os dados e o cache são bind mounts, para sobreviverem à recriação do
 container:
 
 ```text
-./mempalace/data  -> /data
-./mempalace/cache -> /root/.cache
+./data  -> /data
+./cache -> /tmp/.cache
 ```
 
-As portas são publicadas somente no loopback do host:
+## API key
 
-| Porta | Transporte | Uso |
-| --- | --- | --- |
-| `127.0.0.1:5000` | TCP MCP | Clientes stdio/TCP, como Claude Code ou opencode via `socat` |
-| `127.0.0.1:5001` | HTTP MCP | `POST /mcp`, SSE e healthcheck |
+Antes de iniciar o serviço, crie o arquivo de configuração local:
 
-O serviço não fica exposto diretamente à LAN ou à internet por essas portas.
-O container usa a rede `default` gerada automaticamente por este Compose
-(`mempalace_default`). O Nginx do compose geral entra nessa mesma rede como
-rede externa para alcançar `mempalace-mcp:5001` no endpoint público. Não é
-necessário criar uma rede manualmente; basta subir primeiro este Compose.
+```bash
+cp .env.example .env
+chmod 600 .env
+openssl rand -hex 32
+```
 
-### Quem usa cada porta
+Preencha `MEMPALACE_MCP_HTTP_TOKEN` no `.env` com a chave gerada. O Compose
+carrega esse arquivo por `env_file`, e o servidor nativo exige a chave no
+header das requisições:
 
-- **TCP 5000:** é o transporte MCP configurado no OpenClaw, por meio de
-  `socat stdio TCP:localhost:5000`. Também é adequado para clientes como
-  Claude Code e opencode que esperam uma conexão stdio/TCP.
-- **HTTP 5001:** é usado pelos scripts locais que chamam o MCP por JSON-RPC,
-  como `workspace/scripts/mempalace-http.py`, além do healthcheck do Docker
-  em `GET /health`. Também funciona como fallback quando o transporte MCP do
-  gateway não está disponível.
+```http
+Authorization: Bearer <sua-chave>
+```
 
-Assim, são duas entradas para o mesmo serviço e o mesmo `/data`, não dois
-servidores de memória independentes.
+Configure esse header em cada cliente MCP e script que acessa o serviço.
+Sem a chave, ou com uma chave incorreta, o acesso a `/mcp` e `/statusz`
+retorna `401 Unauthorized`. O endpoint `/healthz` continua acessível sem
+autenticação para o healthcheck.
 
-## Bridge
+O `.env` é ignorado pelo Git; versione somente o `.env.example`, sem uma
+chave real. Para trocar a chave, atualize o `.env`, recrie o serviço com
+`docker compose up -d` e atualize os clientes.
 
-O `mcp-tcp-bridge.py` oferece duas entradas para o mesmo servidor MCP:
+## Execução sem root no container
 
-1. **TCP 5000:** aceita uma sessão MCP newline-delimited por conexão e
-   executa um processo MCP dedicado para aquela sessão.
-2. **HTTP 5001:** mantém um pool de workers MCP persistentes, reutiliza o
-   handshake `initialize`, aplica timeout por chamada e reinicia workers que
-   travarem ou encerrarem.
+O processo roda com UID/GID `1000:1000` por padrão. Para usar os IDs do seu
+usuário, execute na pasta deste README:
 
-O bridge é somente transporte/adaptação. Ele não substitui o armazenamento
-do MemPalace nem cria uma segunda base de memória.
+```bash
+export MEMPALACE_UID="$(id -u)"
+export MEMPALACE_GID="$(id -g)"
+mkdir -p data cache
+docker compose up -d
+```
+
+Os diretórios `data/` e `cache/`, incluindo os arquivos existentes, precisam
+permitir leitura e escrita para esse UID/GID. Se uma instalação anterior
+criou arquivos como root, o dono ou administrador precisará corrigir essas
+permissões uma vez.
+
+O `.env` também define `HOME=/tmp` e `XDG_CACHE_HOME=/tmp/.cache` para o
+container. Esses valores precisam permanecer alinhados ao destino do volume
+de cache no Compose.
+
+`HOME=/tmp` fornece um diretório gravável sem root. O Chroma resolve o cache
+do modelo por `Path.home()/.cache`; por isso o bind mount fica em `/tmp/.cache`.
+Os dados continuam persistidos em `/data`; outros arquivos criados no HOME
+são temporários.
+
+Isso configura o usuário do processo no container. Para também executar o
+daemon Docker sem root, o host precisa ter Docker rootless configurado.
+
+## Conexão MCP
+
+Configure o cliente para usar HTTP com a URL:
+
+```text
+http://127.0.0.1:5001/mcp
+```
+
+O servidor recebe chamadas JSON-RPC em `POST /mcp`. A única porta publicada
+é `127.0.0.1:5001`, acessível pelo loopback do host.
+
+O bind `0.0.0.0` dentro do container permite o encaminhamento da porta pelo
+Docker. Containers na mesma rede Docker também podem alcançar o serviço,
+mas precisam enviar a chave para acessar as rotas protegidas.
 
 ## Operação
 
-No diretório deste repositório:
+Na pasta deste README:
 
 ```bash
-# Subir ou recriar o serviço independente
+# Subir ou recriar o serviço
 docker compose up -d
 
 # Ver estado e logs
 docker compose ps mempalace-mcp
 docker compose logs --tail=100 mempalace-mcp
 
-# Healthcheck HTTP
-curl -sS http://127.0.0.1:5001/health
+# Verificar se o servidor HTTP está respondendo: retorna ok
+curl -fsS http://127.0.0.1:5001/healthz
+
+# Consultar estado operacional
+(
+  set -a
+  . ./.env
+  set +a
+  curl -fsS -H "Authorization: Bearer ${MEMPALACE_MCP_HTTP_TOKEN}" http://127.0.0.1:5001/statusz
+)
+
+# Conferir o usuário do processo
+docker compose exec mempalace-mcp id
+
+# Conferir o healthcheck do Docker
+docker inspect mempalace-mcp --format '{{.State.Health.Status}}'
 ```
 
-> **Atenção:** não suba este compose enquanto o serviço `mempalace-mcp` do
-> compose geral estiver ativo. Ambos usam o mesmo `container_name` e as portas
-> 5000/5001. Para trocar de definição, pare primeiro a outra:
->
-> ```bash
-> docker compose -f ../docker-compose.yaml stop mempalace-mcp
-> docker compose up -d
-> ```
-
-Uma resposta saudável informa `status: "ok"` e a quantidade de workers vivos.
-O pool padrão tem dois workers e pode ser ajustado por
-`MCP_HTTP_POOL_SIZE` no compose.
+O healthcheck usa `/healthz` para verificar a disponibilidade do servidor
+HTTP. A prontidão da busca deve ser conferida com uma chamada MCP, pois o
+modelo de embeddings pode ser carregado na primeira consulta.
 
 ## Persistência e Git
 
-Não faça commit de `data/`, `cache/`, `backups/` ou diretórios de teste. Eles
+Não faça commit do `.env`, de `data/`, `cache/`, `backups/` ou diretórios de teste. Eles
 podem conter o palácio pessoal, bancos SQLite, arquivos WAL/SHM e artefatos
-grandes do modelo. O `.gitignore` deste diretório complementa o
-`.gitignore` da raiz de `infra`.
+grandes do modelo. Esses caminhos estão cobertos pelo `.gitignore` local.
 
-Antes de publicar o repositório, confira:
+Antes de publicar, confira:
 
 ```bash
 git status --short
-git diff -- mempalace/mcp-tcp-bridge.py mempalace/README.md mempalace/.gitignore
+git diff -- README.md .gitignore .env.example docker-compose.yaml
 ```
+
+## Licença
+
+Os arquivos deste diretório são distribuídos sob a [licença MIT](LICENSE).
+O [projeto original MemPalace](https://github.com/MemPalace/mempalace)
+possui sua própria [licença MIT](https://github.com/MemPalace/mempalace/blob/develop/LICENSE).
