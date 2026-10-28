@@ -28,10 +28,3 @@ services:
       retries: 3
       start_period: 90s
     restart: unless-stopped
-    networks:
-      - mempalace
-
-networks:
-  mempalace:
-    external: true
-    name: mempalace

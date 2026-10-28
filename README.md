@@ -48,9 +48,10 @@ As portas são publicadas somente no loopback do host:
 | `127.0.0.1:5001` | HTTP MCP | `POST /mcp`, SSE e healthcheck |
 
 O serviço não fica exposto diretamente à LAN ou à internet por essas portas.
-O container entra na rede Docker externa `mempalace`, e o Nginx do compose geral
-também entra nessa rede para alcançar `mempalace-mcp:5001` no endpoint público.
-Em uma instalação isolada, crie a rede antes com `docker network create mempalace`.
+O container usa a rede `default` gerada automaticamente por este Compose
+(`mempalace_default`). O Nginx do compose geral entra nessa mesma rede como
+rede externa para alcançar `mempalace-mcp:5001` no endpoint público. Não é
+necessário criar uma rede manualmente; basta subir primeiro este Compose.
 
 ### Quem usa cada porta
 
