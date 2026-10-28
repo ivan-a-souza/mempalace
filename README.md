@@ -48,6 +48,10 @@ As portas são publicadas somente no loopback do host:
 | `127.0.0.1:5001` | HTTP MCP | `POST /mcp`, SSE e healthcheck |
 
 O serviço não fica exposto diretamente à LAN ou à internet por essas portas.
+O container também entra na rede Docker externa `infra`, permitindo que o Nginx
+do compose geral alcance `mempalace-mcp:5001` para o endpoint público do MCP.
+Essa rede é criada pelo projeto de infraestrutura; em uma instalação isolada,
+crie-a antes com `docker network create infra`.
 
 ### Quem usa cada porta
 
