@@ -29,9 +29,9 @@ services:
       start_period: 90s
     restart: unless-stopped
     networks:
-      - infra
+      - mempalace
 
 networks:
-  infra:
+  mempalace:
     external: true
-    name: infra
+    name: mempalace
