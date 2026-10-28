@@ -1,0 +1,22 @@
+# Dados persistentes do palácio
+data/
+
+# Cache local do modelo de embeddings
+cache/
+
+# Backups locais e cópias de segurança
+backups/
+
+# Diretórios criados por testes de migração/compatibilidade
+test-*-data.*/
+test-*-data*/
+
+# Marcador local de teste ativo
+.active-test-dir
+
+# SQLite temporário, caso apareça fora de data/
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Logs locais do bridge/workers
+*.log
